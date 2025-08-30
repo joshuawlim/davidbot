@@ -23,6 +23,13 @@ async def main():
     """Main function to run DavidBot."""
     logger.info("Starting DavidBot...")
     
+    # Check for required environment variables
+    telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
+    if not telegram_token:
+        logger.error("TELEGRAM_BOT_TOKEN not found in environment variables")
+        logger.error("Please set your bot token in the .env file")
+        return
+    
     # Initialize sheets client
     sheets_client = SheetsClient(fail_gracefully=True)
     
@@ -30,29 +37,17 @@ async def main():
     bot_handler = BotHandler(sheets_client=sheets_client)
     
     logger.info("DavidBot initialized successfully")
+    logger.info("Starting Telegram long polling...")
     
-    # Example usage - in production this would be replaced with Telegram bot integration
-    while True:
-        try:
-            user_input = input("Enter user_id:message (or 'quit' to exit): ")
-            if user_input.lower() == 'quit':
-                break
-                
-            if ':' not in user_input:
-                print("Please use format: user_id:message")
-                continue
-                
-            user_id, message = user_input.split(':', 1)
-            
-            response = await bot_handler.handle_message(user_id.strip(), message.strip())
-            print(f"Bot response: {response}")
-            
-        except KeyboardInterrupt:
-            break
-        except Exception as e:
-            logger.error(f"Error in main loop: {e}")
-            
-    logger.info("DavidBot shutting down")
+    try:
+        # Start the bot with long polling
+        await bot_handler.start_polling(telegram_token)
+    except KeyboardInterrupt:
+        logger.info("Received shutdown signal")
+    except Exception as e:
+        logger.error(f"Error in main loop: {e}")
+    finally:
+        logger.info("DavidBot shutting down")
 
 
 if __name__ == "__main__":

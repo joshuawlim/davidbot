@@ -1,6 +1,6 @@
 """Response formatter for PRD format compliance."""
 
-from typing import List
+from typing import List, Dict, Any
 from .models import Song, SearchResult
 
 
@@ -9,8 +9,8 @@ class ResponseFormatter:
     
     def format_search_result(self, search_result: SearchResult) -> str:
         """
-        Format search result in PRD format:
-        "Title — Artist | Key G | 72 BPM | tags: altar-call | link: [URL] | matched: 'surrender'"
+        DEPRECATED: Use format_individual_songs() instead for new UX.
+        Format search result in PRD format as single message.
         """
         if not search_result or not search_result.songs:
             return "No songs found for your search."
@@ -22,20 +22,29 @@ class ResponseFormatter:
         
         return '\n'.join(formatted_lines)
     
+    def format_individual_songs(self, search_result: SearchResult) -> List[str]:
+        """
+        Format search result as individual messages for improved UX.
+        Returns list of formatted strings, one per song.
+        """
+        if not search_result or not search_result.songs:
+            return ["No songs found for your search."]
+        
+        individual_messages = []
+        for song in search_result.songs:
+            message = self._format_song_line(song, search_result.matched_term)
+            individual_messages.append(message)
+        
+        return individual_messages
+    
     def _format_song_line(self, song: Song, matched_term: str) -> str:
         """Format a single song line in PRD format."""
-        # Format tags as comma-separated string
+        # Format tags as comma-separated string (lowercase for PRD format)
         tags_str = ', '.join(song.tags)
         
-        # Build the formatted line
-        line = (f"{song.title} — {song.artist} | "
-                f"Key {song.key} | "
-                f"{song.bpm} BPM | "
-                f"tags: {tags_str} | "
-                f"link: {song.url} | "
-                f"matched: '{matched_term}'")
-        
-        return line
+        # PRD format: Title — Artist | Suggested Key | BPM | tags: ... | link: ... | rationale: matched 'term'
+        return (f"{song.title} — {song.artist} | Key {song.key} | {song.bpm} BPM | "
+                f"tags: {tags_str} | link: {song.url} | rationale: matched '{matched_term}'")
     
     def format_no_previous_search_message(self) -> str:
         """Format message when user requests 'more' without previous search."""
@@ -51,7 +60,7 @@ class ResponseFormatter:
     
     def format_invalid_feedback_message(self) -> str:
         """Format message for invalid feedback format."""
-        return "Please provide feedback in format '👍 1', '👍 2', or '👍 3' for songs 1-3."
+        return "Try: 👍 1 for first song, 👍 2 for second song, 👍 3 for third song."
     
     def format_no_feedback_context_message(self) -> str:
         """Format message when feedback provided without search context.""" 
