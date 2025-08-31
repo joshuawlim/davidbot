@@ -38,13 +38,19 @@ class ResponseFormatter:
         return individual_messages
     
     def _format_song_line(self, song: Song, matched_term: str) -> str:
-        """Format a single song line in PRD format."""
-        # Format tags as comma-separated string (lowercase for PRD format)
+        """Format a single song line in clean, readable format."""
+        # Format tags as comma-separated string
         tags_str = ', '.join(song.tags)
         
-        # PRD format: Title — Artist | Suggested Key | BPM | tags: ... | link: ... | rationale: matched 'term'
-        return (f"{song.title} — {song.artist} | Key {song.key} | {song.bpm} BPM | "
-                f"tags: {tags_str} | link: {song.url} | rationale: matched '{matched_term}'")
+        # Clean format:
+        # Title - Artist
+        # Key | BPM  
+        # Tags
+        # Link
+        return (f"{song.title} - {song.artist}\n"
+                f"Key {song.key} | {song.bpm} BPM\n"
+                f"{tags_str}\n"
+                f"{song.url}")
     
     def format_no_previous_search_message(self) -> str:
         """Format message when user requests 'more' without previous search."""
@@ -60,7 +66,7 @@ class ResponseFormatter:
     
     def format_invalid_feedback_message(self) -> str:
         """Format message for invalid feedback format."""
-        return "Try: 👍 1 for first song, 👍 2 for second song, 👍 3 for third song."
+        return "Try: 👍 1 for first song, 👍 2 for second song, 👍 3 for third song, etc."
     
     def format_no_feedback_context_message(self) -> str:
         """Format message when feedback provided without search context.""" 

@@ -107,8 +107,8 @@ class DatabaseRecommendationEngine:
                 # Apply familiarity scoring to boost familiar songs
                 scored_songs = self._apply_familiarity_scoring(matching_songs)
                 
-                # Return up to 3 songs (matching original behavior)
-                selected_songs = scored_songs[:3]
+                # Return up to 5 songs for better variety
+                selected_songs = scored_songs[:5]
                 
                 logger.info(f"Found {len(selected_songs)} songs for theme '{matched_theme}'")
                 
@@ -199,7 +199,7 @@ class DatabaseRecommendationEngine:
                 # Log scoring results
                 if songs_with_scores:
                     logger.info(f"Familiarity scoring applied:")
-                    for item in songs_with_scores[:3]:  # Log top 3
+                    for item in songs_with_scores[:5]:  # Log top 5
                         score = item['familiarity_score']
                         song = item['song']
                         logger.info(f"  {song.title} by {song.artist}: score {score}")

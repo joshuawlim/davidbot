@@ -36,7 +36,7 @@ class TestFeedbackLoggingAcceptance:
         user_id = "test_user_feedback_123"
         
         # Given: User has received song recommendations
-        await bot_handler.handle_message(user_id, "find songs on grace")
+        await bot_handler.handle_message(user_id, "find songs on surrender")
         
         # When: User provides thumbs up feedback for song 1
         feedback_response = await bot_handler.handle_message(user_id, "👍 1")
@@ -97,7 +97,7 @@ class TestFeedbackLoggingAcceptance:
         user_id = "test_user_feedback_000"
         
         # Given: User has song recommendations
-        await bot_handler.handle_message(user_id, "find songs on peace")
+        await bot_handler.handle_message(user_id, "find songs on praise")
         
         # Test various invalid formats
         invalid_formats = ["👍 0", "👍 4", "👍", "👍 abc", "👍 -1"]

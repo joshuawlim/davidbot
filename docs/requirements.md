@@ -1,7 +1,7 @@
 # DavidBot PRD (Prototype on Telegram → Migrate to Twilio)
 
 ## Overview
-DavidBot recommends altar call songs in real time from short prompts by prioritizing thematic lyric match and tempo/energy fit, returning 3–5 concise results per request. The prototype runs on Telegram using long polling from a personal computer, then migrates to Twilio AU SMS for live service use. [1][2]
+DavidBot recommends altar call songs in real time from short prompts by prioritizing thematic lyric match and tempo/energy fit, returning 3–5 results as separate messages per request. Each song recommendation is delivered as an individual message to enable direct feedback reactions. The prototype runs on Telegram using long polling from a personal computer, then migrates to Twilio AU SMS for live service use. [1][2]
 
 ## Goals
 - Primary: Maximize thematic match to sermon keywords and fit to altar-call tempo/energy, defaulting to worship‑slow when unspecified. [2][3]
@@ -11,7 +11,7 @@ DavidBot recommends altar call songs in real time from short prompts by prioriti
 - Worship leaders, music directors, pastors; prototype on Telegram; later live use via AU SMS long code. [1][3]
 
 ## Scope
-- MVP: Telegram chat input with multiple keywords; returns 3–5 song picks with compact metadata and a short rationale; supports follow-up modifiers; simple feedback (“👍/👎/used”). [1][2]
+- MVP: Telegram chat input with multiple keywords; returns 3–5 song picks as individual messages with compact metadata and a short rationale; supports follow-up modifiers; direct feedback via emoji reactions on individual song messages. [1][2]
 - Next: Learn-to-rank from feedback, NLP auto-tagging of lyrics, optional Planning Center export, Twilio SMS channel. [1][5]
 
 ## Channels and Sessions
@@ -23,17 +23,18 @@ DavidBot recommends altar call songs in real time from short prompts by prioriti
 
 ### Inputs
 - Free-text prompt: “find songs on x, y, z.” Bot prompts for lead (male/female) and pace (praise/fast or worship/slow; default worship‑slow). [1][2]
-- Follow-ups: “more,” “slower,” “faster,” “male/female,” “key G,” “used <#>,” “👍 <#>,” “👎 <#>,” within 60‑minute session. [1][7]
+- Follow-ups: "more," "slower," "faster," "male/female," "key G," within 60‑minute session. Feedback via direct emoji reactions (👍/👎) on individual song messages. [1][7]
 
 ### Outputs
-- 3–5 items, one per line: Title — Artist | Suggested Key | BPM | tags: … | link: MultiTracks/YouTube | rationale: matched ‘keywords’, slow. [2][1]
-- Keep under one segment on SMS later: 160 GSM-7/70 UCS‑2; segmenting increases cost and may split messages. [2][8]
+- 3–5 individual messages, one song per message: Title — Artist | Suggested Key | BPM | tags: … | link: MultiTracks/YouTube | rationale: matched 'keywords', slow. [2][1]
+- Each message formatted for direct feedback reactions (👍/👎) to enable precise learning loops
+- SMS migration consideration: Multiple messages increase segment costs; may require combined format for SMS channel. [2][8]
 
 ### Data and Admin
 - Source of truth: Google Sheets. Sheets: Songs, Lyrics, Feedback, MessageLog. Single admin edits directly. [4][9]
 - Songs: SongID, Title, Artist, OriginalKey, BPM, BoyKey(s), GirlKey(s), Tags (lyric + style), ResourceLink (MultiTracks/YouTube), CCLI (optional). [10][11]
 - Lyrics: SongID, FullLyrics, Sections, Language. [10][12]
-- Feedback: Timestamp, UserID (hashed), SessionID, SongID, Action, ContextKeywords, Params. [4][9]
+- Feedback: Timestamp, UserID (hashed), SessionID, SongID, Action (thumbs_up/thumbs_down), ContextKeywords, MessageID (for direct reaction tracking). [4][9]
 
 ### Recommendation Logic
 - Matching priority: lyrics/tag semantic match > BPM/energy fit > key fit; default altar‑call bias to slow unless “praise/fast.” [2][3]
@@ -41,7 +42,7 @@ DavidBot recommends altar call songs in real time from short prompts by prioriti
 - Fallbacks: relax BPM/energy first, then expand tags; always return up to 3–5 with rationale. [1][7]
 
 ### Learning
-- Record “👍/👎/used” to Feedback; apply simple per‑song score boost/penalty for future rankings. [4][1]
+- Record direct emoji reactions (👍/👎) and "used" messages to Feedback; track specific MessageID for precise song-feedback mapping; apply per‑song score boost/penalty for future rankings. [4][1]
 
 ## Non‑Functional Requirements
 - Latency: near‑instant replies; local Telegram long polling is sufficient for prototype. [1][6]
@@ -63,11 +64,12 @@ DavidBot recommends altar call songs in real time from short prompts by prioriti
 
 ### Query Flow
 1) Receive message → parse keywords; if missing lead/tempo, ask: “Male or female lead? Praise (fast) or worship (slow; default)?” [1][7]
-2) Retrieve Songs + Lyrics from Sheets → compute scores → return top 3–5 with concise metadata and rationale. [4][9]
-3) Log interaction to MessageLog; retain context for 60 minutes. [4][1]
+2) Retrieve Songs + Lyrics from Sheets → compute scores → return top 3–5 as individual messages with concise metadata and rationale. [4][9]
+3) Log each message to MessageLog with unique MessageID; retain context for 60 minutes; store song-to-message mapping for feedback tracking. [4][1]
 
 ### Feedback Flow
-- Parse “used <n>,” “👍 <n>,” “👎 <n>” → map n to SongID from last response → append Feedback → adjust per‑song score. [4][9]
+- Capture direct emoji reactions (👍/👎) on individual song messages → map MessageID to SongID → append Feedback with precise song identification → adjust per‑song score. [4][9]
+- Fallback: Parse "used <song_title>" for explicit usage reporting when direct reactions unavailable. [4][9]
 
 ### Ingestion Flow
 - Add new songs via Google Sheets; lyrics via manual paste or one‑off scrape; optional NLP auto‑tagging that writes Tags back to Songs sheet (admins override via Sheets). [4][9]
@@ -75,20 +77,93 @@ DavidBot recommends altar call songs in real time from short prompts by prioriti
 ## Message Design
 
 Telegram examples
-- “Find songs on surrender, repentance, salvation.” → Bot: “Lead? Male/female. Pace? Praise/fast or worship/slow (default).” [1][7]
-- Result lines: “O Come to the Altar — Elevation | Key G | 72 BPM | tags: altar-call, reflective | link: … | matched: ‘surrender’” [1][2]
+- "Find songs on surrender, repentance, salvation." → Bot: "Lead? Male/female. Pace? Praise/fast or worship/slow (default)." [1][7]
+- Result format (3 separate messages):
+  Message 1: "O Come to the Altar — Elevation | Key G | 72 BPM | tags: altar-call, reflective | link: … | matched: 'surrender'"
+  Message 2: "My Hallelujah — Bethel Music | Key D | 68 BPM | tags: surrender, worship | link: … | matched: 'surrender'"
+  Message 3: "Center (Live) — Bethel Music | Key G | 68 BPM | tags: repentance, slow | link: … | matched: 'repentance'" [1][2]
+- User reacts with 👍 directly on Message 2 → feedback recorded for "My Hallelujah"
 
 SMS adaptation notes
-- Keep lines short; avoid emojis that trigger UCS‑2 unless intended; target one segment. [2][17]
+- Individual messages will increase segment costs significantly; consider reverting to combined format for SMS channel
+- Keep lines short; avoid emojis that trigger UCS‑2 unless intended; target one segment per song when possible. [2][17]
+- SMS feedback may require fallback to text commands ("used song 1") due to limited reaction capabilities.
 
 ## Testing
 - Golden set: 20 curated songs with hand tags; verify queries, follow-ups, feedback logging, and key selection behavior. [4][1]
+- Individual message delivery: verify each song appears as separate message with unique MessageID
+- Direct feedback reactions: test emoji reaction capture and mapping to specific songs
 - Session expiry: verify context drops after 60 minutes. [1][7]
 
+## Success Metrics & Acceptance Criteria
+
+### User Story 1: Individual Song Recommendations
+**As a** worship leader  
+**I want** each song recommendation delivered as a separate message  
+**So that** I can easily scan and react to individual songs without confusion  
+
+**Acceptance Criteria:**
+- Given user searches for songs with "find songs on surrender"
+- When bot returns recommendations
+- Then each song appears as a separate message
+- And each message contains complete song metadata (title, artist, key, BPM, tags, link, rationale)
+
+### User Story 2: Direct Feedback on Individual Songs  
+**As a** worship leader  
+**I want** to react with 👍 directly on the song I use  
+**So that** the bot learns my preferences precisely without position tracking confusion  
+
+**Acceptance Criteria:**
+- Given user has received individual song recommendation messages  
+- When user reacts with 👍 emoji on a specific message
+- Then feedback is logged with precise song identification (MessageID → SongID mapping)
+- And user receives confirmation that feedback was recorded
+- And future recommendations are improved based on this precise feedback
+
+### User Story 3: Improved Learning Loop
+**As a** worship leader  
+**I want** the bot to learn from my specific song choices  
+**So that** future recommendations better match my preferences and context  
+
+**Acceptance Criteria:**
+- Given user has provided feedback on individual songs via direct reactions
+- When user makes subsequent searches with similar themes  
+- Then previously liked songs receive ranking boost
+- And recommendations become more personalized over time
+
+### Key Performance Indicators
+- **Feedback Precision**: % of feedback events with specific song identification (target: >95%)
+- **User Engagement**: Average reactions per recommendation set (target: increase from baseline)  
+- **Learning Effectiveness**: Improvement in recommendation relevance over time (measured via continued usage)
+- **Error Reduction**: Decrease in "wrong song" feedback compared to position-based system
+
+## Technical Implementation Changes
+
+### ResponseFormatter Updates Required
+- Change `format_search_result()` to return array of individual messages instead of single concatenated string
+- Add MessageID generation and tracking for each song message
+- Implement song-to-message mapping storage for feedback correlation
+
+### Bot Handler Updates Required  
+- Modify message sending to iterate through individual song messages
+- Implement emoji reaction event handling for direct feedback capture
+- Update feedback parsing to map MessageID to SongID instead of position-based lookup
+- Maintain backward compatibility with text-based feedback as fallback
+
+### Data Schema Extensions
+- Add MessageID field to Feedback table for precise reaction tracking
+- Extend MessageLog to store song-to-message relationships
+- Consider indexed MessageID→SongID lookup for performance
+
+### Migration Considerations
+- Telegram implementation: Full individual message support with reaction handling
+- SMS implementation: Evaluate cost impact; may require channel-specific formatting (combined vs individual)
+- Maintain session context across multiple outbound messages
+
 ## Rollout
-- Phase 0: Local Telegram long polling prototype on a laptop/desktop. [1][6]
-- Phase 1: Deploy Telegram webhook on a small VPS for 24/7 uptime. [1][6]
-- Phase 2: Enable Twilio AU SMS; configure webhook to n8n; verify STOP handling and single‑segment formatting. [3][2]
+- Phase 0: Local Telegram long polling prototype with individual message delivery. [1][6]
+- Phase 1: Deploy Telegram webhook on a small VPS for 24/7 uptime with reaction handling. [1][6]
+- Phase 2: Enable Twilio AU SMS; evaluate individual vs combined message format based on cost analysis; implement fallback feedback mechanisms. [3][2]
 
 ## Open Items
 - Synonym bootstrapping for themes (e.g., surrender ~ repentance/response). [1][7]

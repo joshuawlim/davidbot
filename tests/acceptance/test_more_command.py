@@ -65,8 +65,10 @@ class TestMoreCommandAcceptance:
         response = await bot_handler.handle_message(user_id, "more")
         
         # Then: Should return helpful message, not crash
-        assert "previous search" in response.lower() or "search first" in response.lower()
-        assert response != ""
+        assert isinstance(response, list)
+        response_text = response[0].lower() if response else ""
+        assert "previous search" in response_text or "search first" in response_text
+        assert response != []
     
     @pytest.mark.asyncio
     async def test_multiple_more_commands_return_different_sets(self, bot_handler):
@@ -107,8 +109,12 @@ class TestMoreCommandAcceptance:
         
         # User1 says more - should get surrender songs
         user1_more = await bot_handler.handle_message(user1_id, "more")
-        assert "matched: 'surrender'" in user1_more
+        assert isinstance(user1_more, list)
+        user1_combined = "\n".join(user1_more)
+        assert "rationale: matched 'surrender'" in user1_combined
         
         # User2 says more - should get worship songs
         user2_more = await bot_handler.handle_message(user2_id, "more")
-        assert "matched: 'worship'" in user2_more
+        assert isinstance(user2_more, list)
+        user2_combined = "\n".join(user2_more)
+        assert "rationale: matched 'worship'" in user2_combined

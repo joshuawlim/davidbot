@@ -38,7 +38,7 @@ class TestResponseFormatter:
         assert "84 BPM" in first_line
         assert "tags: grace, salvation" in first_line
         assert "link: https://example.com/amazing-grace" in first_line
-        assert "matched: 'grace'" in first_line
+        assert "rationale: matched 'grace'" in first_line
     
     def test_format_empty_result(self, formatter):
         """Test formatting when no songs found."""

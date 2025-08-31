@@ -185,4 +185,9 @@ class TestMessageLoggingAcceptance:
         call_args = mock_sheets_client.log_message.call_args[0]
         message_log = call_args[0]
         
-        assert message_log.response_content == actual_response
+        # For list responses, logging combines them with separator
+        if isinstance(actual_response, list):
+            expected_logged_content = "\n---\n".join(actual_response)
+            assert message_log.response_content == expected_logged_content
+        else:
+            assert message_log.response_content == actual_response

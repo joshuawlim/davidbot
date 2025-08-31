@@ -160,8 +160,8 @@ class RecommendationEngine:
         if not matching_songs:
             return None
             
-        # Return up to 3 songs
-        selected_songs = matching_songs[:3]
+        # Return up to 5 songs
+        selected_songs = matching_songs[:5]
         
         return SearchResult(
             songs=selected_songs,
