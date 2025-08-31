@@ -44,12 +44,14 @@ MINISTRY CONTEXT:
 - You serve worship leaders preparing for services, altar calls, and ministry moments
 - Common worship themes: surrender, worship, praise, grace, love, peace, hope, faith, joy, redemption, salvation, healing, breakthrough, presence, holy spirit
 - BPM guidance: slow/contemplative (60-85) for altar calls and ministry, moderate (86-120) for worship, upbeat (121-160+) for praise and celebration
-- Musical keys: A, Bb, B, C, C#, D, Eb, E, F, F#, G, Ab (consider congregation's vocal range)
+- Musical keys: A, Bb, B, C, C#, D, Eb, E, F, F#, G, Ab
 - "Altar call" = slow, contemplative, surrender/response themes that invite people to draw near to God
 
 WORSHIP LEADER QUERY PATTERNS:
-- "upbeat songs for celebration" → themes: ["celebration", "joy"], bpm_min: 120
+- "upbeat songs for celebration" → themes: ["celebration", "joy"], bpm_min: 110
 - "slow songs about grace" → themes: ["grace", "mercy"], bpm_max: 85  
+- "ministry songs under 85 BPM" → bpm_max: 85
+- "fast songs in the key of G" → themes: ["praise"], key_preference: "G", bpm_min: 120
 - "something like Amazing Grace" → similarity_song: "Amazing Grace"
 - "songs we haven't used lately" → exclude_recent: true
 - "praise songs in G for our congregation" → themes: ["praise"], key_preference: "G"
@@ -82,6 +84,8 @@ REQUIRED JSON FORMAT:
 
 PARSING RULES:
 - Always return valid JSON only - never add explanations
+- Extract BPM constraints: "under X BPM" → bpm_max: X, "over X BPM" → bpm_min: X, "fast" → bpm_min: 120, "slow" → bpm_max: 85
+- Extract key preferences: "in G" → key_preference: "G", "key of A" → key_preference: "A"
 - Include related worship concepts: "healing" includes "restoration", "breakthrough", "freedom"
 - Map heart language: "broken" → "surrender", "celebration" → "joy", "thanksgiving" → "gratitude"
 - Extract song titles from "like [Title]" or "similar to [Title]" patterns
@@ -257,9 +261,9 @@ class MockLLMQueryParser:
         
         # Check for feedback patterns first
         if ('second' in query_lower and 'perfect' in query_lower) or \
-           ('👍' in query) or \
-           ('thumbs up' in query_lower) or \
-           ('loved' in query_lower):
+           ('👍' in query) or ('👎' in query) or \
+           ('thumbs up' in query_lower) or ('thumbs down' in query_lower) or \
+           ('loved' in query_lower) or ('didn\'t like' in query_lower):
             return ParsedQuery(
                 themes=[],
                 intent='feedback',
@@ -279,25 +283,58 @@ class MockLLMQueryParser:
         # Simple rule-based parsing for search
         themes = []
         bpm_min, bpm_max = None, None
+        key_preference = None
         
+        # Extract themes (expanded to handle more worship contexts)
         if 'surrender' in query_lower:
             themes.append('surrender')
         if 'worship' in query_lower or 'praise' in query_lower:
             themes.append('worship')
-        if 'celebration' in query_lower:
+        if 'celebration' in query_lower or 'celebrate' in query_lower:
             themes.append('joy')
-        if 'grace' in query_lower:
+        if 'grace' in query_lower or 'mercy' in query_lower:
             themes.append('grace')
+        if 'healing' in query_lower or 'ministry' in query_lower:
+            themes.append('healing')
+        if 'love' in query_lower or 'loving' in query_lower:
+            themes.append('love')
+        if 'peace' in query_lower or 'peaceful' in query_lower:
+            themes.append('peace')
+        if 'hope' in query_lower or 'hopeful' in query_lower:
+            themes.append('hope')
+        if 'faith' in query_lower or 'trust' in query_lower:
+            themes.append('faith')
+        if 'joy' in query_lower or 'joyful' in query_lower:
+            themes.append('joy')
+        if 'salvation' in query_lower or 'redemption' in query_lower:
+            themes.append('salvation')
+        if 'energetic' in query_lower or 'energy' in query_lower:
+            themes.append('praise')
         
-        if 'upbeat' in query_lower or 'fast' in query_lower:
+        # Extract BPM constraints with number parsing
+        import re
+        bpm_pattern = r'under (\d+)\s*bpm|below (\d+)\s*bpm|<\s*(\d+)\s*bpm'
+        bpm_match = re.search(bpm_pattern, query_lower)
+        if bpm_match:
+            bpm_num = int(bpm_match.group(1) or bpm_match.group(2) or bpm_match.group(3))
+            bpm_max = bpm_num
+        elif 'upbeat' in query_lower or 'fast' in query_lower:
             bpm_min = 120
         elif 'slow' in query_lower:
             bpm_max = 85
+        
+        # Extract key preferences with expanded patterns (case-insensitive)
+        key_pattern = r'key of ([a-g][#b]?)|in ([a-g][#b]?)|([a-g][#b]?) key|songs in ([a-g][#b]?)|in the key of ([a-g][#b]?)'
+        key_match = re.search(key_pattern, query_lower)
+        if key_match:
+            # Get the first non-None group
+            key_preference = next((group.upper() for group in key_match.groups() if group), None)
         
         return ParsedQuery(
             themes=themes if themes else ['worship'],
             bpm_min=bpm_min,
             bpm_max=bpm_max,
+            key_preference=key_preference,
             intent='search',
             confidence=0.8,
             raw_query=query

@@ -58,6 +58,13 @@ async def main():
     if use_enhanced_handler:
         logger.info(f"Ollama service available at {ollama_url} - using enhanced bot handler with natural language processing")
         bot_handler = create_enhanced_bot_handler(ollama_url, use_mock_llm=False)
+        
+        # Pre-warm Ollama model at startup for best performance
+        logger.info("Pre-warming Ollama model for optimal response times...")
+        try:
+            await bot_handler._warm_up_ollama()
+        except Exception as e:
+            logger.debug(f"Startup warm-up failed (non-critical): {e}")
     else:
         logger.info(f"Ollama service not available at {ollama_url} - using enhanced handler with mock LLM")
         bot_handler = create_enhanced_bot_handler(ollama_url, use_mock_llm=True)

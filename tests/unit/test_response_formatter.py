@@ -49,8 +49,17 @@ class TestResponseFormatter:
     
     def test_format_feedback_confirmation(self, formatter):
         """Test feedback confirmation message formatting."""
+        # Test default (thumbs_up) without song title
         confirmation = formatter.format_feedback_confirmation(2)
-        assert "Thanks for the feedback on song 2!" == confirmation
+        assert "✅ Thanks! I've noted song 2 as a good choice." == confirmation
+        
+        # Test thumbs_up with song title
+        confirmation_with_title = formatter.format_feedback_confirmation(1, "thumbs_up", "Amazing Grace")
+        assert "✅ Great! I've noted that 'Amazing Grace' worked well for this situation." == confirmation_with_title
+        
+        # Test thumbs_down with song title
+        negative_confirmation = formatter.format_feedback_confirmation(2, "thumbs_down", "Test Song")
+        assert "📝 Got it. I'll remember that 'Test Song' wasn't quite right for this context." == negative_confirmation
     
     def test_format_invalid_feedback_message(self, formatter):
         """Test invalid feedback message contains guidance."""

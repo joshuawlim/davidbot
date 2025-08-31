@@ -60,9 +60,20 @@ class ResponseFormatter:
         """Format message when user session has expired."""
         return "Your search session has expired. Please search first before requesting more songs."
     
-    def format_feedback_confirmation(self, song_position: int) -> str:
+    def format_feedback_confirmation(self, song_position: int, feedback_type: str = "thumbs_up", song_title: str = None) -> str:
         """Format confirmation message for feedback."""
-        return f"Thanks for the feedback on song {song_position}!"
+        if feedback_type == "thumbs_up":
+            if song_title:
+                return f"✅ Great! I've noted that '{song_title}' worked well for this situation."
+            else:
+                return f"✅ Thanks! I've noted song {song_position} as a good choice."
+        elif feedback_type == "thumbs_down":
+            if song_title:
+                return f"📝 Got it. I'll remember that '{song_title}' wasn't quite right for this context."
+            else:
+                return f"📝 Thanks for the feedback on song {song_position}. I'll adjust future recommendations."
+        else:
+            return f"Thanks for the feedback on song {song_position}!"
     
     def format_invalid_feedback_message(self) -> str:
         """Format message for invalid feedback format."""

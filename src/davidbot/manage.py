@@ -104,12 +104,12 @@ def import_songs_command(json_file: str):
                 song = song_repo.create({
                     'title': song_data.get('title', ''),
                     'artist': song_data.get('artist', ''),
-                    'original_key': song_data.get('key', 'C'),
+                    'original_key': song_data.get('original_key', 'C'),
                     'bpm': song_data.get('bpm'),
                     'tags': json.dumps(song_data.get('tags', [])),
                     'resource_link': song_data.get('url', ''),
-                    'boy_keys': json.dumps(song_data.get('boy_keys', [])),
-                    'girl_keys': json.dumps(song_data.get('girl_keys', [])),
+                    'meter': song_data.get('meter', '4/4'),
+                    'lead_gender': song_data.get('lead_gender', 'Unknown'),
                 })
                 
                 # Create lyrics if provided
@@ -159,8 +159,8 @@ def export_songs_command(json_file: str):
                 'bpm': song.bpm,
                 'tags': song.tags_list,
                 'url': song.resource_link,
-                'boy_keys': song.boy_keys_list,
-                'girl_keys': song.girl_keys_list,
+                'meter': song.meter,
+                'lead_gender': song.lead_gender,
                 'lyrics': lyrics.full_lyrics if lyrics else None,
             }
             export_data.append(song_data)

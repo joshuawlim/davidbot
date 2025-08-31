@@ -323,12 +323,22 @@ class SongUsageRepository:
             # Exponential decay: recent usage worth more
             # Base score of 1.0, decays by half every 60 days
             decay_factor = math.exp(-days_ago / 86.4)  # ~60 day half-life
-            score_contribution = 1.0 * decay_factor
+            
+            # Handle feedback-based adjustments
+            if usage.service_type == 'feedback_positive':
+                # Positive feedback adds 0.1 to familiarity
+                score_contribution = 0.1 * decay_factor
+            elif usage.service_type == 'feedback_negative':
+                # Negative feedback subtracts 0.1 from familiarity
+                score_contribution = -0.1 * decay_factor
+            else:
+                # Regular usage contributes 1.0
+                score_contribution = 1.0 * decay_factor
             
             total_score += score_contribution
         
-        # Cap at 10.0 and round to 1 decimal place
-        return min(round(total_score, 1), 10.0)
+        # Ensure score is between 0.0 and 10.0, round to 1 decimal place
+        return max(0.0, min(round(total_score, 1), 10.0))
     
     def get_most_familiar_songs(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Get songs with highest familiarity scores."""

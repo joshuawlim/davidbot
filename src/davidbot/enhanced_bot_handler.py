@@ -14,7 +14,8 @@ from .database_recommendation_engine import create_recommendation_engine
 from .response_formatter import ResponseFormatter
 from .session_manager import SessionManager
 from .models import FeedbackEvent
-from .database import get_db_session, MessageLogRepository, FeedbackRepository, SongRepository, Song
+from .database import get_db_session, MessageLogRepository, FeedbackRepository, SongRepository, SongUsageRepository, Song
+from .conversational_responder import create_conversational_responder
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +68,11 @@ class EnhancedBotHandler:
         if use_mock_llm:
             logger.info("Using mock LLM parser (no API calls)")
             self.query_parser = MockLLMQueryParser()
+            self.conversational_responder = create_conversational_responder(ollama_url, use_mock=True)
         else:
             logger.info("Using Ollama LLM parser with gpt-oss:latest")
             self.query_parser = LLMQueryParser(ollama_url)
+            self.conversational_responder = create_conversational_responder(ollama_url, use_mock=False)
         
         # Log status
         health = self.enhanced_engine.health_check()
@@ -157,8 +160,8 @@ class EnhancedBotHandler:
         # Update user session
         self.session_manager.create_or_update_session(user_id, search_result)
         
-        # Format response with worship leader context
-        return self._format_enhanced_response(search_result, parsed_query)
+        # Generate conversational response
+        return await self._generate_conversational_response(search_result, parsed_query, user_id)
     
     async def _handle_more_request(self, user_id: str, parsed_query: ParsedQuery) -> List[str]:
         """Handle requests for more songs with context awareness."""
@@ -193,9 +196,7 @@ class EnhancedBotHandler:
         return self.response_formatter.format_individual_songs(more_result)
     
     async def _handle_feedback(self, user_id: str, message: str) -> str:
-        """Handle feedback with enhanced context awareness."""
-        # Use original feedback handling for now
-        # TODO: Could enhance with LLM understanding of "that second one was perfect"
+        """Handle feedback with enhanced context awareness and familiarity score updates."""
         import re
         
         session = self.session_manager.get_session(user_id)
@@ -205,9 +206,19 @@ class EnhancedBotHandler:
         # Enhanced feedback parsing
         message_clean = message.strip().lower()
         
+        # Determine feedback type (like or dislike)
+        feedback_type = None
+        if '👍' in message or 'thumbs up' in message_clean or 'perfect' in message_clean or 'loved' in message_clean:
+            feedback_type = "thumbs_up"
+        elif '👎' in message or 'thumbs down' in message_clean or 'didn\'t like' in message_clean or 'not good' in message_clean:
+            feedback_type = "thumbs_down"
+        
+        if not feedback_type:
+            return "Please use 👍 or 👎 to give feedback on songs."
+        
         # Handle natural feedback like "the second one" or "song 2"
         patterns = [
-            r'👍\s*(\d+)',  # "👍 2"
+            r'[👍👎]\s*(\d+)',  # "👍 2" or "👎 2"
             r'(?:the\s+)?(?:second|2nd|third|3rd|first|1st)\s+(?:one|song)',  # "the second one"
             r'(?:song|number)\s*(\d+)',  # "song 2"
         ]
@@ -227,47 +238,71 @@ class EnhancedBotHandler:
                 break
         
         if not position:
-            return "Please specify which song you liked (e.g., '👍 2' or 'the second one was perfect')."
+            return f"Please specify which song you {feedback_type.replace('_', ' ')}d (e.g., '👍 2' or '👎 1')."
         
         # Validate position
         num_songs = len(session.last_search.songs) if session.last_search else 0
         if position < 1 or position > num_songs:
             return f"Please choose a number between 1 and {num_songs}."
         
-        # Create feedback event
+        # Get song details
         song_title = session.last_search.songs[position - 1].title
+        
+        # Create feedback event
         feedback_event = FeedbackEvent(
             user_id=user_id,
             song_position=position,
-            feedback_type="thumbs_up",
+            feedback_type=feedback_type,
             timestamp=datetime.now(),
             song_title=song_title
         )
         
-        # Log feedback
-        await self._log_feedback(feedback_event)
+        # Log feedback and update familiarity score
+        await self._log_feedback_and_update_familiarity(feedback_event)
         
         # Update session activity
         self.session_manager.update_session_activity(user_id)
         
-        return f"Thanks! I've noted that you liked '{song_title}'. This helps me learn your preferences."
+        # Generate natural conversational feedback response
+        return await self.conversational_responder.generate_feedback_response(song_title, feedback_type, position)
     
-    async def _handle_unknown_query(self, user_id: str, parsed_query: ParsedQuery) -> str:
+    async def _handle_unknown_query(self, user_id: str, parsed_query: ParsedQuery) -> Union[str, List[str]]:
         """Handle queries that couldn't be understood."""
+        # Before giving up, try a fallback search using the raw query
+        # This helps handle cases where LLM parsing fails but the query contains searchable terms
+        if parsed_query.confidence >= 0.4 or parsed_query.themes or parsed_query.key_preference:
+            logger.info(f"Attempting fallback search for unknown query: '{parsed_query.raw_query}'")
+            
+            # Try database search with the raw query
+            session = self.session_manager.get_session(user_id)
+            excluded_songs = session.returned_songs if session else []
+            
+            fallback_result = self.database_engine.search(parsed_query.raw_query, excluded_songs)
+            
+            if fallback_result and fallback_result.songs:
+                # Update user session
+                self.session_manager.create_or_update_session(user_id, fallback_result)
+                # Format response
+                return self._format_enhanced_response(fallback_result, parsed_query)
+        
+        # If fallback search didn't work or confidence is too low, provide help
         if parsed_query.confidence < 0.3:
             return (
                 "I'm not sure what you're looking for. Try something like:\n"
                 "• 'Find songs on surrender'\n"
                 "• 'Upbeat songs for celebration'\n"
                 "• 'Songs like Amazing Grace'\n"
+                "• 'Songs in the key of G'\n"
                 "• 'More songs' (after a search)"
             )
         else:
             # Try to be helpful based on what we understood
             if parsed_query.themes:
                 return f"I understood you're looking for songs about {', '.join(parsed_query.themes)}, but I need a clearer request. Try 'find songs on {parsed_query.themes[0]}'."
+            elif parsed_query.key_preference:
+                return f"I see you're looking for songs in {parsed_query.key_preference}. Try 'find songs in the key of {parsed_query.key_preference}' or 'worship songs in {parsed_query.key_preference}'."
             else:
-                return "Could you rephrase that? I help find worship songs - try 'find songs on [theme]'."
+                return "Could you rephrase that? I help find worship songs - try 'find songs on [theme]' or 'songs in the key of [G]'."
     
     def _update_conversation_context(self, user_id: str, parsed_query: ParsedQuery, response: Union[str, List[str]]):
         """Update conversation context based on interaction."""
@@ -290,10 +325,15 @@ class EnhancedBotHandler:
         """Check if message is direct feedback (emoji or explicit)."""
         message_cleaned = message.strip().lower()
         return (message_cleaned.startswith('👍') or 
+                message_cleaned.startswith('👎') or
                 message_cleaned == '👍' or
+                message_cleaned == '👎' or
                 'thumbs up' in message_cleaned or
+                'thumbs down' in message_cleaned or
                 'perfect' in message_cleaned or
-                'loved' in message_cleaned)
+                'loved' in message_cleaned or
+                'didn\'t like' in message_cleaned or
+                'not good' in message_cleaned)
     
     def _is_greeting(self, message: str) -> bool:
         """Check if message is a greeting."""
@@ -371,7 +411,35 @@ I understand ministry context, BPM preferences, keys, and can suggest songs for 
 
 What kind of songs are you looking for today?"""
         
+        # Start Ollama warm-up in background to prepare for next query
+        asyncio.create_task(self._warm_up_ollama())
+        
         return response
+    
+    async def _warm_up_ollama(self) -> None:
+        """Warm up Ollama model with a simple query to reduce cold-start latency."""
+        try:
+            # Only warm up if using real LLM (not mock)
+            from .llm_query_parser import MockLLMQueryParser
+            if isinstance(self.query_parser, MockLLMQueryParser):
+                logger.debug("Skipping warm-up for mock LLM")
+                return
+                
+            logger.info("🔥 Warming up Ollama model for faster responses...")
+            start_time = datetime.now()
+            
+            # Send a minimal warm-up query to load model into memory
+            # Use a very short query to minimize parsing time but ensure model loads
+            warm_up_query = "worship"
+            parsed_result = await self.query_parser.parse(warm_up_query)
+            
+            warm_up_time = (datetime.now() - start_time).total_seconds() * 1000
+            logger.info(f"✅ Ollama model warmed up in {warm_up_time:.0f}ms - ready for fast responses!")
+            logger.debug(f"Warm-up result: {parsed_result.intent} with {len(parsed_result.themes)} themes")
+            
+        except Exception as e:
+            # Warm-up failure shouldn't break anything - log and continue
+            logger.debug(f"Ollama warm-up failed (non-critical): {e}")
     
     def _create_no_results_message(self, parsed_query: ParsedQuery) -> str:
         """Create helpful no-results message with adjacent theme suggestions."""
@@ -412,7 +480,58 @@ What kind of songs are you looking for today?"""
         if intro:
             responses.insert(0, intro)
         
+        # Add feedback instructions after songs
+        feedback_msg = "👍 React with thumbs up on songs you like, or say 'more' for additional options!"
+        responses.append(feedback_msg)
+        
         return responses
+    
+    async def _generate_conversational_response(self, search_result, parsed_query: ParsedQuery, user_id: str) -> List[str]:
+        """Generate natural conversational response using LLM."""
+        try:
+            # Get conversation context
+            context = self.conversation_context.get_context(user_id)
+            
+            # Generate conversational response
+            response_data = await self.conversational_responder.generate_search_response(
+                search_result, parsed_query, context
+            )
+            
+            # Convert to message list format
+            messages = []
+            
+            # Add intro message
+            if response_data.get("intro_message"):
+                messages.append(response_data["intro_message"])
+            
+            # Add individual songs with natural formatting
+            song_presentations = response_data.get("song_presentations", [])
+            for i, presentation in enumerate(song_presentations):
+                if i < len(search_result.songs):
+                    song = search_result.songs[i]
+                    
+                    # Natural song presentation format
+                    song_msg = f"{song.title} - {song.artist}\n"
+                    song_msg += f"Key {song.key} | {song.bpm} BPM\n"
+                    song_msg += f"{', '.join(song.tags)}\n"
+                    song_msg += f"{song.url}"
+                    
+                    # Add ministry note if available
+                    if presentation.get("ministry_note"):
+                        song_msg += f"\n💭 {presentation['ministry_note']}"
+                    
+                    messages.append(song_msg)
+            
+            # Add closing message
+            if response_data.get("closing_message"):
+                messages.append(response_data["closing_message"])
+            
+            return messages
+            
+        except Exception as e:
+            logger.error(f"Error generating conversational response: {e}")
+            # Fallback to enhanced formatting
+            return self._format_enhanced_response(search_result, parsed_query)
     
     def _get_ministry_intro(self, parsed_query: ParsedQuery) -> Optional[str]:
         """Generate ministry-appropriate intro based on query context."""
@@ -447,23 +566,41 @@ What kind of songs are you looking for today?"""
     
     def _get_search_acknowledgment_intro(self, parsed_query: ParsedQuery, search_result) -> Optional[str]:
         """Generate intro that acknowledges what the user actually searched for."""
-        if not parsed_query.themes:
+        # Check if we found songs for their search
+        if not search_result or not search_result.songs:
             return None
             
-        # Get the actual themes the user searched for
-        user_themes = parsed_query.themes
-        themes_text = ', '.join(user_themes)
+        # Build contextual acknowledgment based on the full request
+        parts = []
         
-        # Check if we found songs for their search
-        if search_result and search_result.songs:
-            # We found songs for their search
-            if len(user_themes) == 1:
-                return f"Here are some songs about {user_themes[0]}:"
+        # Add BPM/tempo context first (most specific)
+        if parsed_query.bpm_min and parsed_query.bpm_max:
+            parts.append(f"{parsed_query.bpm_min}-{parsed_query.bpm_max} BPM")
+        elif parsed_query.bpm_min:
+            parts.append(f"fast (>{parsed_query.bpm_min} BPM)")
+        elif parsed_query.bpm_max:
+            if parsed_query.bpm_max <= 85:
+                parts.append(f"slow (<{parsed_query.bpm_max} BPM)")
             else:
-                return f"Here are some songs about {themes_text}:"
+                parts.append(f"<{parsed_query.bpm_max} BPM")
+        
+        # Add key context
+        if parsed_query.key_preference:
+            parts.append(f"in {parsed_query.key_preference}")
+            
+        # Add theme context
+        if parsed_query.themes:
+            theme_text = parsed_query.themes[0] if len(parsed_query.themes) == 1 else ', '.join(parsed_query.themes[:2])
+            if parts:
+                parts.append(f"about {theme_text}")
+            else:
+                parts.append(theme_text)
+        
+        if parts:
+            context_text = ' '.join(parts)
+            return f"Here are some songs {context_text}:"
         else:
-            # We didn't find exact matches - this is handled by no_results flow
-            return None
+            return "Here are some songs for you:"
     
     async def _log_enhanced_message(self, user_id: str, message_type: str, message_content: str,
                                    response_content: Union[str, List[str]], parsed_query: Optional[ParsedQuery],
@@ -533,6 +670,57 @@ What kind of songs are you looking for today?"""
                     
         except Exception as e:
             logger.error(f"Failed to log feedback: {e}")
+    
+    async def _log_feedback_and_update_familiarity(self, feedback_event: FeedbackEvent) -> None:
+        """Log feedback event and update familiarity score by +0.1 for likes, -0.1 for dislikes."""
+        try:
+            with get_db_session() as session:
+                feedback_repo = FeedbackRepository(session)
+                usage_repo = SongUsageRepository(session)
+                song = session.query(Song).filter(Song.title == feedback_event.song_title).first()
+                
+                if song:
+                    # Log the feedback event
+                    feedback_data = {
+                        'timestamp': feedback_event.timestamp,
+                        'user_id': feedback_event.user_id,
+                        'song_id': song.song_id,
+                        'action': feedback_event.feedback_type,
+                        'context_keywords': '[]',
+                        'search_params': '{}'
+                    }
+                    feedback_repo.create(feedback_data)
+                    
+                    # Update familiarity score via micro-usage records
+                    # Each 0.1 change requires approximately 0.12 usage score contribution
+                    # (accounting for decay factor in the calculation)
+                    import math
+                    from datetime import timedelta
+                    
+                    if feedback_event.feedback_type == "thumbs_up":
+                        # Add positive micro-usage to increase familiarity by ~0.1
+                        usage_repo.record_usage(
+                            song_id=song.song_id,
+                            service_type='feedback_positive',
+                            notes=f'thumbs_up_feedback_+0.1'
+                        )
+                        logger.info(f"Increased familiarity for '{song.title}' (+0.1 via positive feedback)")
+                    
+                    elif feedback_event.feedback_type == "thumbs_down":
+                        # For negative feedback, we create a usage record with a special negative service type
+                        # The familiarity calculation will need to handle this case
+                        usage_repo.record_usage(
+                            song_id=song.song_id,
+                            service_type='feedback_negative',
+                            notes=f'thumbs_down_feedback_-0.1'
+                        )
+                        logger.info(f"Recorded negative feedback for '{song.title}' (-0.1 penalty)")
+                
+                else:
+                    logger.warning(f"Could not find song for feedback: {feedback_event.song_title}")
+                    
+        except Exception as e:
+            logger.error(f"Failed to log feedback and update familiarity: {e}")
     
     async def start_polling(self, telegram_token: str) -> None:
         """Start Telegram long polling to receive and handle messages."""

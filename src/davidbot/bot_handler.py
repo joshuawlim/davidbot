@@ -73,9 +73,15 @@ class BotHandler:
             "search for songs", 
             "songs on",
             "songs about",
-            "songs with"
+            "songs with",
+            "songs in",
+            "key of",
+            "in the key",
+            "show me songs",
+            "i need songs",
+            "worship songs"
         ]
-        return any(pattern in message for pattern in search_patterns)
+        return any(pattern in message.lower() for pattern in search_patterns)
     
     def _is_feedback(self, message: str) -> bool:
         """Check if message is feedback (👍 emoji reaction or text)."""
@@ -176,7 +182,7 @@ class BotHandler:
         self.session_manager.update_session_activity(user_id)
         
         # Return confirmation (song_position is guaranteed to be > 0 at this point)
-        return self.response_formatter.format_feedback_confirmation(song_position)
+        return self.response_formatter.format_feedback_confirmation(song_position, "thumbs_up", song_title)
     
     async def _log_message(self, user_id: str, message_type: str, message_content: str, response_content: str) -> None:
         """Log message interaction to database."""

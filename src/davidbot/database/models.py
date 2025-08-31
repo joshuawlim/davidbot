@@ -19,8 +19,8 @@ class Song(Base):
     artist = Column(String, nullable=False)
     original_key = Column(String, nullable=False)
     bpm = Column(Integer)
-    boy_keys = Column(Text)  # JSON array: ["G", "A", "Bb"]
-    girl_keys = Column(Text)  # JSON array: ["F", "G", "Ab"]
+    meter = Column(Text)  # Time signature: "4/4", "3/4", "6/8"
+    lead_gender = Column(Text)  # "Male", "Female", "Both", "Unknown"
     tags = Column(Text)  # JSON array: ["surrender", "worship"]
     resource_link = Column(Text)
     ccli_number = Column(String)
@@ -34,25 +34,26 @@ class Song(Base):
     themes = relationship("ThemeMapping", back_populates="song", cascade="all, delete-orphan")
     usage_history = relationship("SongUsage", back_populates="song", cascade="all, delete-orphan")
     
+    # These properties are kept for backward compatibility
     @property
     def boy_keys_list(self) -> List[str]:
-        """Get boy keys as list."""
-        return json.loads(self.boy_keys) if self.boy_keys else []
+        """Get boy keys as list (deprecated - now stores meter)."""
+        return []  # No longer used
     
     @boy_keys_list.setter
     def boy_keys_list(self, keys: List[str]):
-        """Set boy keys from list."""
-        self.boy_keys = json.dumps(keys)
+        """Set boy keys from list (deprecated - now stores meter)."""
+        pass  # No longer used
     
     @property
     def girl_keys_list(self) -> List[str]:
-        """Get girl keys as list."""
-        return json.loads(self.girl_keys) if self.girl_keys else []
+        """Get girl keys as list (deprecated - now stores lead_gender)."""
+        return []  # No longer used
     
     @girl_keys_list.setter
     def girl_keys_list(self, keys: List[str]):
-        """Set girl keys from list."""
-        self.girl_keys = json.dumps(keys)
+        """Set girl keys from list (deprecated - now stores lead_gender)."""
+        pass  # No longer used
     
     @property
     def tags_list(self) -> List[str]:

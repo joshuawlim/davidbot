@@ -56,9 +56,10 @@ class DatabaseRecommendationEngine:
                 theme_repo = ThemeMappingRepository(session)
                 lyrics_repo = LyricsRepository(session)
                 
-                # Extract search terms from query
+                # Extract search terms and key preference from query
                 query_lower = query.lower()
                 potential_themes = self._extract_themes_from_query(query_lower)
+                key_preference = self._extract_key_from_query(query_lower)
                 
                 # Search by themes first (most accurate)
                 matching_songs = []
@@ -103,6 +104,15 @@ class DatabaseRecommendationEngine:
                 if not matching_songs:
                     logger.warning(f"No songs found for query: '{query}'")
                     return None
+                
+                # Apply key filtering if key preference was specified
+                if key_preference and matching_songs:
+                    key_filtered_songs = self._filter_songs_by_key(matching_songs, key_preference)
+                    if key_filtered_songs:
+                        matching_songs = key_filtered_songs
+                        matched_theme = f"{matched_theme} in {key_preference}"
+                    else:
+                        logger.info(f"No songs found in key {key_preference}, returning all matches")
                 
                 # Apply familiarity scoring to boost familiar songs
                 scored_songs = self._apply_familiarity_scoring(matching_songs)
@@ -160,6 +170,77 @@ class DatabaseRecommendationEngine:
                 found_themes.append(word)
         
         return found_themes
+    
+    def _extract_key_from_query(self, query_lower: str) -> Optional[str]:
+        """Extract key preference from user query."""
+        import re
+        
+        # Enhanced key patterns to match various ways users might specify keys
+        key_patterns = [
+            r'key of ([A-G]#?b?)',
+            r'in ([A-G]#?b?)',
+            r'([A-G]#?b?) key',
+            r'songs in ([A-G]#?b?)',
+            r'in the key of ([A-G]#?b?)',
+            r'show me songs in ([A-G]#?b?)',
+            r'songs in the key of ([A-G]#?b?)'
+        ]
+        
+        for pattern in key_patterns:
+            match = re.search(pattern, query_lower)
+            if match:
+                key = match.group(1).upper()
+                # Normalize key formats
+                if 'b' in key.lower():
+                    key = key.replace('b', 'b').replace('B', 'b')
+                return key
+                
+        return None
+    
+    def _filter_songs_by_key(self, songs: List[BotSong], target_key: str) -> List[BotSong]:
+        """Filter songs by key preference, checking original_key only."""
+        if not target_key or not songs:
+            return songs
+        
+        try:
+            with get_db_session() as session:
+                filtered_songs = []
+                
+                for bot_song in songs:
+                    # Get the database song to check keys
+                    db_song = session.query(Song).filter(
+                        Song.title == bot_song.title,
+                        Song.artist == bot_song.artist
+                    ).first()
+                    
+                    if db_song and self._song_has_key(db_song, target_key):
+                        filtered_songs.append(bot_song)
+                
+                logger.info(f"Key filter: {len(filtered_songs)}/{len(songs)} songs match key {target_key}")
+                return filtered_songs
+                
+        except Exception as e:
+            logger.error(f"Error filtering songs by key: {e}")
+            return songs  # Return all songs on error
+    
+    def _song_has_key(self, db_song: Song, target_key: str) -> bool:
+        """Check if a song has the target key in its original_key field."""
+        # Check original key only
+        if db_song.original_key and self._keys_match(db_song.original_key, target_key):
+            return True
+                
+        return False
+    
+    def _keys_match(self, key1: str, key2: str) -> bool:
+        """Check if two keys match, handling different notations."""
+        if not key1 or not key2:
+            return False
+            
+        # Normalize keys for comparison
+        def normalize_key(key):
+            return key.upper().replace('B', 'b')  # Normalize flat notation
+            
+        return normalize_key(key1) == normalize_key(key2)
     
     def _apply_familiarity_scoring(self, songs: List[BotSong]) -> List[BotSong]:
         """Apply familiarity scoring to boost familiar songs in results."""
