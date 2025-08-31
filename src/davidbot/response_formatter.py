@@ -1,7 +1,8 @@
 """Response formatter for PRD format compliance."""
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from .models import Song, SearchResult
+from .database import get_db_session, LyricsRepository
 
 
 class ResponseFormatter:
@@ -39,18 +40,139 @@ class ResponseFormatter:
     
     def _format_song_line(self, song: Song, matched_term: str) -> str:
         """Format a single song line in clean, readable format."""
-        # Format tags as comma-separated string
-        tags_str = ', '.join(song.tags)
+        # Select 3-5 most relevant tags based on the search term
+        relevant_tags = self._select_relevant_tags(song.tags, matched_term)
+        tags_str = ', '.join(relevant_tags)
         
-        # Clean format:
-        # Title - Artist
-        # Key | BPM  
-        # Tags
-        # Link
-        return (f"{song.title} - {song.artist}\n"
-                f"Key {song.key} | {song.bpm} BPM\n"
-                f"{tags_str}\n"
-                f"{song.url}")
+        # Get chorus and bridge snippets
+        chorus_snippet = self._get_lyrics_snippet(song.title, song.artist, 'chorus')
+        bridge_snippet = self._get_lyrics_snippet(song.title, song.artist, 'bridge')
+        
+        # Build the response
+        lines = [
+            f"{song.title} - {song.artist}",
+            f"Key {song.key} | {song.bpm} BPM",
+            f"{tags_str}",
+            f"{song.url}"
+        ]
+        
+        # Add lyrics snippets only if available
+        if chorus_snippet:
+            lines.append(f"Chorus: {chorus_snippet}")
+        if bridge_snippet:
+            lines.append(f"Bridge: {bridge_snippet}")
+            
+        return '\n'.join(lines)
+    
+    def _get_lyrics_snippet(self, title: str, artist: str, section: str) -> Optional[str]:
+        """Get first 4-6 words of chorus or bridge for a song."""
+        try:
+            with get_db_session() as session:
+                lyrics_repo = LyricsRepository(session)
+                
+                # Find the song to get its ID
+                from .database import Song as DBSong
+                db_song = session.query(DBSong).filter(
+                    DBSong.title == title,
+                    DBSong.artist == artist
+                ).first()
+                
+                if not db_song:
+                    return None
+                
+                # Get lyrics
+                lyrics = lyrics_repo.get_by_song_id(db_song.song_id)
+                if not lyrics:
+                    return None
+                
+                # Extract the requested section
+                section_text = getattr(lyrics, section, None)
+                if not section_text:
+                    return None
+                
+                # Get first 4-6 words
+                words = section_text.split()[:6]
+                return ' '.join(words)
+                
+        except Exception:
+            return None
+    
+    def _select_relevant_tags(self, tags: List[str], search_term: str) -> List[str]:
+        """Select 3-5 most relevant tags based on search query."""
+        if not tags:
+            return []
+        
+        # Convert search term to lowercase for matching
+        search_lower = search_term.lower() if search_term else ""
+        
+        # Priority system for tag selection
+        exact_matches = []
+        partial_matches = []
+        semantic_matches = []
+        other_tags = []
+        
+        # Define semantic relationships for common worship terms
+        semantic_groups = {
+            'joy': ['celebration', 'rejoice', 'gladness', 'happiness'],
+            'worship': ['praise', 'adoration', 'exaltation', 'glory'],
+            'love': ['devotion', 'heart', 'affection', 'beloved'],
+            'faith': ['trust', 'belief', 'confidence', 'assurance'],
+            'holy': ['sacred', 'pure', 'sanctified', 'consecrated'],
+            'spirit': ['presence', 'power', 'wind', 'fire'],
+            'jesus': ['christ', 'savior', 'lord', 'messiah'],
+            'peace': ['rest', 'calm', 'quiet', 'stillness'],
+            'hope': ['expectation', 'future', 'promise', 'anchor'],
+            'freedom': ['liberation', 'release', 'deliverance', 'breakthrough']
+        }
+        
+        for tag in tags:
+            tag_lower = tag.lower()
+            
+            # Exact match with search term
+            if search_lower in tag_lower or tag_lower in search_lower:
+                exact_matches.append(tag)
+            # Partial word match
+            elif any(word in tag_lower for word in search_lower.split()):
+                partial_matches.append(tag)
+            # Semantic match - check if search term maps to this tag
+            elif search_lower in semantic_groups and tag_lower in semantic_groups[search_lower]:
+                semantic_matches.append(tag)
+            # Reverse semantic match - check if tag maps to search term
+            elif any(search_lower in group and tag_lower == key for key, group in semantic_groups.items()):
+                semantic_matches.append(tag)
+            else:
+                other_tags.append(tag)
+        
+        # Build final tag list (3-5 tags)
+        selected = []
+        
+        # Add exact matches first (up to 2)
+        selected.extend(exact_matches[:2])
+        
+        # Add partial matches (up to 2 more)
+        remaining = 5 - len(selected)
+        selected.extend(partial_matches[:min(2, remaining)])
+        
+        # Add semantic matches (up to remaining slots)
+        remaining = 5 - len(selected)
+        selected.extend(semantic_matches[:remaining])
+        
+        # Fill with other high-quality tags if still under 3
+        while len(selected) < 3 and other_tags:
+            # Prefer common worship tags
+            priority_tags = ['worship', 'praise', 'faith', 'love', 'holy spirit', 'jesus', 'god', 'lord']
+            priority_found = [tag for tag in other_tags if any(priority in tag.lower() for priority in priority_tags)]
+            
+            if priority_found:
+                selected.append(priority_found[0])
+                other_tags.remove(priority_found[0])
+            else:
+                selected.append(other_tags[0])
+                other_tags.pop(0)
+        
+        # Ensure we have at least 3 tags if available, max 5
+        final_count = min(max(len(selected), 3), 5)
+        return selected[:final_count] if selected else tags[:3]
     
     def format_no_previous_search_message(self) -> str:
         """Format message when user requests 'more' without previous search."""
