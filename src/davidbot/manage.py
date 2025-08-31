@@ -116,7 +116,7 @@ def import_songs_command(json_file: str):
                 if song_data.get('lyrics'):
                     lyrics_repo.create({
                         'song_id': song.song_id,
-                        'full_lyrics': song_data['lyrics'],
+                        'first_line': song_data['lyrics'][:100] if song_data['lyrics'] else None,
                         'language': song_data.get('language', 'en')
                     })
                 
@@ -161,7 +161,7 @@ def export_songs_command(json_file: str):
                 'url': song.resource_link,
                 'meter': song.meter,
                 'lead_gender': song.lead_gender,
-                'lyrics': lyrics.full_lyrics if lyrics else None,
+                'lyrics': lyrics.combined_content if lyrics else None,
             }
             export_data.append(song_data)
     
@@ -191,7 +191,7 @@ def search_command(query: str, preview: bool = False):
                 if preview:
                     lyrics = lyrics_repo.get_by_song_id(song.song_id)
                     if lyrics:
-                        preview_text = lyrics.full_lyrics[:100] + "..." if len(lyrics.full_lyrics) > 100 else lyrics.full_lyrics
+                        preview_text = lyrics.combined_content[:100] + "..." if len(lyrics.combined_content) > 100 else lyrics.combined_content
                         print(f"    Preview: {preview_text}")
         
         # Search by text

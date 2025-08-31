@@ -9,6 +9,7 @@ from datetime import datetime
 
 from .models import SearchResult, Song as BotSong
 from .llm_query_parser import ParsedQuery
+from .response_formatter import ResponseFormatter
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class ConversationalResponder:
         self.use_mock = use_mock
         self.model_name = None
         self.system_prompt = self._create_system_prompt()
+        self.response_formatter = ResponseFormatter()
         
     def _create_system_prompt(self) -> str:
         """Create system prompt for natural conversation generation."""
@@ -83,7 +85,10 @@ Remember: Be helpful and concise. Focus on practical song recommendations withou
             return self._mock_search_response(search_result, parsed_query)
             
         try:
-            # Prepare context for the LLM
+            # Use ResponseFormatter to get properly formatted songs
+            formatted_songs = self.response_formatter.format_individual_songs(search_result)
+            
+            # Prepare context for the LLM - now with formatted song data
             context = {
                 "user_request": parsed_query.raw_query,
                 "themes": parsed_query.themes,
@@ -91,31 +96,31 @@ Remember: Be helpful and concise. Focus on practical song recommendations withou
                 "bpm_range": f"{parsed_query.bpm_min or 'any'}-{parsed_query.bpm_max or 'any'}",
                 "mood": parsed_query.mood,
                 "song_count": len(search_result.songs),
-                "songs": [
-                    {
-                        "title": song.title,
-                        "artist": song.artist, 
-                        "key": song.key,
-                        "bpm": song.bpm,
-                        "tags": song.tags[:3],  # Top 3 tags to avoid overloading
-                        "url": song.url
-                    }
-                    for song in search_result.songs
-                ]
+                "formatted_songs": formatted_songs  # Use formatted songs instead of raw data
             }
             
             prompt = f"""
 User asked: "{parsed_query.raw_query}"
 
+Here are the formatted songs to present:
+{chr(10).join(formatted_songs)}
+
 Context: {json.dumps(context, indent=2)}
 
 Generate a natural, warm response that:
 1. Acknowledges their specific request naturally
-2. Presents the songs with ministry context and personal touches
-3. Shows understanding of worship leading needs
-4. Invites natural feedback
+2. Presents each song exactly as provided in the formatted_songs (don't reformat them)
+3. Adds ministry context and personal touches around the formatted song data
+4. Shows understanding of worship leading needs
+5. Invites natural feedback
 
 Response must be valid JSON only - no additional text.
+Use this format:
+{{
+    "intro_message": "Natural conversational introduction to the song list",
+    "formatted_songs": {formatted_songs},
+    "closing_message": "Natural wrap-up that invites feedback or offers more help"
+}}
 """
 
             # Get response from LLM
@@ -265,6 +270,9 @@ Respond with just the message text (no JSON, no quotes).
     def _mock_search_response(self, search_result: SearchResult, parsed_query: ParsedQuery) -> Dict[str, Any]:
         """Generate mock conversational response when LLM unavailable."""
         
+        # Use ResponseFormatter to get properly formatted songs
+        formatted_songs = self.response_formatter.format_individual_songs(search_result)
+        
         # Brief intro based on request
         if parsed_query.key_preference:
             intro = f"Songs in {parsed_query.key_preference}:"
@@ -278,30 +286,12 @@ Respond with just the message text (no JSON, no quotes).
         else:
             intro = "Song options:"
         
-        # Song presentations with brief notes
-        song_presentations = []
-        ministry_notes = [
-            "Good congregational response",
-            "Right energy level", 
-            "Strong lyrics",
-            "Builds well",
-            "Good atmosphere",
-            "Flows nicely"
-        ]
-        
-        for i, song in enumerate(search_result.songs):
-            song_presentations.append({
-                "song_title": song.title,
-                "artist": song.artist,
-                "ministry_note": ministry_notes[i % len(ministry_notes)]
-            })
-        
         # Brief closing
         closing = "Let me know if you need more options."
         
         return {
             "intro_message": intro,
-            "song_presentations": song_presentations,
+            "formatted_songs": formatted_songs,
             "closing_message": closing
         }
     

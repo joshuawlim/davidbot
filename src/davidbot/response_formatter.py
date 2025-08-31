@@ -85,8 +85,14 @@ class ResponseFormatter:
                 if not lyrics:
                     return None
                 
-                # Extract the requested section
-                section_text = getattr(lyrics, section, None)
+                # Extract the requested section (chorus or bridge)
+                if section == 'chorus':
+                    section_text = lyrics.chorus
+                elif section == 'bridge':
+                    section_text = lyrics.bridge
+                else:
+                    return None
+                
                 if not section_text:
                     return None
                 

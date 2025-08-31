@@ -504,23 +504,10 @@ What kind of songs are you looking for today?"""
             if response_data.get("intro_message"):
                 messages.append(response_data["intro_message"])
             
-            # Add individual songs with natural formatting
-            song_presentations = response_data.get("song_presentations", [])
-            for i, presentation in enumerate(song_presentations):
-                if i < len(search_result.songs):
-                    song = search_result.songs[i]
-                    
-                    # Natural song presentation format
-                    song_msg = f"{song.title} - {song.artist}\n"
-                    song_msg += f"Key {song.key} | {song.bpm} BPM\n"
-                    song_msg += f"{', '.join(song.tags)}\n"
-                    song_msg += f"{song.url}"
-                    
-                    # Add ministry note if available
-                    if presentation.get("ministry_note"):
-                        song_msg += f"\n💭 {presentation['ministry_note']}"
-                    
-                    messages.append(song_msg)
+            # Add individual songs - now using formatted_songs from ResponseFormatter
+            formatted_songs = response_data.get("formatted_songs", [])
+            for formatted_song in formatted_songs:
+                messages.append(formatted_song)
             
             # Add closing message
             if response_data.get("closing_message"):
